@@ -1,0 +1,27 @@
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+*.so
+
+.venv/
+venv/
+env/
+
+.env
+.env.*
+!.env.example
+
+
+.vscode/
+.idea/
+*.swp
+*.swo
+
+
+.DS_Store
+Thumbs.db
+
+# This is for my notes lol
+personalREADME.md
