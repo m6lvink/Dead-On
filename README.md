@@ -25,9 +25,25 @@ Utilizing **Google Gemini 2.0 Flash** to interpret natural language requests (li
 
 ## Architecture
 
-1.  **`main.py` (Server):** Handles the FastAPI lifecycle and checks LINE Webhook signatures.
-2.  **`tripFlow.py` (Logic Core):** Manages session state, connects with the Gemini API, and controls the recommendation flow.
-3.  **`stationService.py` (Geospatial Layer):** Loads station data into memory and runs Haversine distance calculations and fuzzy string matching.
+The project relies on these core files:
+
+1.  **`main.py`** (Server)
+    * The entry point for the application.
+    * Handles the FastAPI server and validates LINE Webhook signatures.
+    * Enforces security by checking User IDs against the allowlist.
+2.  **`tripFlow.py`** (Logic Core)
+    * The brain of the bot.
+    * Manages chat sessions and connects with the Gemini API.
+    * Handles the logic for retries, formatting responses, and generating Google Maps links.
+3.  **`stationService.py`** (Geospatial Layer)
+    * The map engine.
+    * Loads `stations.json` into memory.
+    * Performs Haversine distance calculations and runs fuzzy string matching to find stations.
+4.  **`lineWebhook.py`** (Utility)
+    * Handles the cryptographic validation required by LINE to verify message authenticity.
+    * Parses raw request bodies into usable event objects.
+5.  **`tripModels.py`** (Data Structures)
+    * Defines strict Python dataclasses (like `TripConstraints` and `StationRecord`) to ensure data consistency across the app.
 
 ## Setup
 
