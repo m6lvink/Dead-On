@@ -1,58 +1,45 @@
-import hmac
-import hashlib
 import base64
+import hashlib
+import hmac
 import json
 import os
-from typing import Dict, List, Optional
-from tripModels import TripRequest
+from typing import List, Dict, Any, Optional, Tuple
 
-def validateLineSignature(headers: Dict[str, str], bodyBytes: bytes) -> bool:
-    lineChannelSecret = os.environ.get("LINE_CHANNEL_SECRET")
-    signatureHeader = headers.get("x-line-signature", "")
-    
-    hash = hmac.new(
-        lineChannelSecret.encode("utf-8"),
-        bodyBytes,
-        hashlib.sha256
-    )
-    expectedSignature = base64.b64encode(hash.digest()).decode("utf-8")
-    
-    return hmac.compare_digest(signatureHeader, expectedSignature)
-
-def parseLineEvents(bodyBytes: bytes) -> List[Dict]:
-    bodyData = json.loads(bodyBytes.decode("utf-8"))
-    return bodyData.get("events", [])
-
-def extractMessageFromEvent(event: Dict) -> Optional[tuple]:
-    if event.get("type") != "message":
-        return None
-    
-    if event.get("message", {}).get("type") != "text":
-        return None
-    
-    messageText = event.get("message", {}).get("text", "")
-    replyToken = event.get("replyToken", "")
-    userId = event.get("source", {}).get("userId", "")
-    
-    if not messageText or not replyToken:
-        return None
-    
-    return (messageText, replyToken, userId)
-
-def handleLineWebhook(headers: Dict[str, str], bodyBytes: bytes) -> Dict:
-    isValidSignature = validateLineSignature(headers, bodyBytes)
-    if not isValidSignature:
-        return {"status": "error", "message": "Invalid signature"}
-    
-    eventList = parseLineEvents(bodyBytes)
-    
-    processedCount = 0
-    for event in eventList:
-        extractedData = extractMessageFromEvent(event)
-        if extractedData is None:
-            continue
+def validateLineSignature(headers: Dict[str, Any], bodyBytes: bytes) -> bool:
+    channelSecret = os.environ.get("LINE_CHANNEL_SECRET")
+    if channelSecret is None:
+        return False
         
-        messageText, replyToken, userId = extractedData
-        processedCount += 1
+    signature = headers.get("x-line-signature")
+    if signature is None:
+        return False
+        
+    hashObj = hmac.new(channelSecret.encode("utf-8"), bodyBytes, hashlib.sha256)
+    calculatedSignature = base64.b64encode(hashObj.digest()).decode("utf-8")
     
-    return {"status": "ok", "processed": processedCount}
+    return signature == calculatedSignature
+
+def parseLineEvents(bodyBytes: bytes) -> List[Dict[str, Any]]:
+    try:
+        bodyStr = bodyBytes.decode("utf-8")
+        bodyJson = json.loads(bodyStr)
+        return bodyJson.get("events", [])
+    except:
+        return list()
+
+def extractMessageFromEvent(event: Dict[str, Any]) -> Optional[Tuple[str, str, str]]:
+    eventType = event.get("type")
+    if eventType != "message":
+        return None
+        
+    messageObj = event.get("message", {})
+    messageType = messageObj.get("type")
+    if messageType != "text":
+        return None
+        
+    text = messageObj.get("text", "")
+    replyToken = event.get("replyToken", "")
+    source = event.get("source", {})
+    userId = source.get("userId", "")
+    
+    return (text, replyToken, userId)

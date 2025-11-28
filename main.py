@@ -1,124 +1,87 @@
-import json
-from typing import List
-
+import os
+import requests
+from datetime import datetime
 from fastapi import FastAPI, Request, HTTPException
-
+from contextlib import asynccontextmanager
+from apscheduler.schedulers.background import BackgroundScheduler
 from lineWebhook import validateLineSignature, parseLineEvents, extractMessageFromEvent
-from tripParser import parseTripFromNaturalText
-from tripModels import StationInfo, POIInfo
-from destinationSelector import selectCandidateStations
-from itineraryGenerator import createItineraryOptions
-from messageFormatter import formatItineraryForLine, createLineReply
+from tripFlow import generateTripResponse, chatSessions
 
-app = FastAPI()
+# Fail CLose security setup
+allowed_env = os.environ.get("ALLOWED_USER_IDS", "")
+ALLOWED_USERS = [x.strip() for x in allowed_env.split(",") if x.strip()]
 
+if not ALLOWED_USERS:
+    print("CRITICAL SECURITY WARNING: ALLOWED_USER_IDS is empty!")
+    print("The bot will BLOCK ALL REQUESTS until you add your User ID to .env.")
 
-def loadStationDataset() -> List[StationInfo]:
-    stationList = []
-    with open("stationDataset.json", "r", encoding="utf-8") as stationFile:
-        dataList = json.load(stationFile)
-    for stationData in dataList:
-        poiList = []
-        for poiData in stationData.get("poiList", []):
-            poiList.append(POIInfo(
-                poiName=poiData.get("poiName", ""),
-                poiType=poiData.get("poiType", "")
-            ))
-        stationInfo = StationInfo(
-            stationName=stationData.get("stationName", ""),
-            linkedStations=stationData.get("linkedStations", []),
-            approxRoundTripCost=stationData.get("approxRoundTripCost", 0),
-            approxTravelMinutesTotal=stationData.get("approxTravelMinutesTotal", 0),
-            poiList=poiList
-        )
-        stationList.append(stationInfo)
-    return stationList
+# Schecduler
+scheduler = BackgroundScheduler()
 
+def clear_chat_history():
+    print(f"[{datetime.now()}] MAINTENANCE: Clearing all chat history...")
+    chatSessions.clear()
+    print("MAINTENANCE: Memory wiped.")
 
-stationDataset = loadStationDataset()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    scheduler.add_job(clear_chat_history, 'interval', hours=6)
+    scheduler.start()
+    yield
+    scheduler.shutdown()
 
+app = FastAPI(lifespan=lifespan)
 
-def findStationByName(stationName: str) -> bool:
-    stationNameLower = stationName.lower()
-    for stationInfo in stationDataset:
-        if stationInfo.stationName.lower() == stationNameLower:
-            return True
-    return False
+# Logic for the linebot
+def sendLineReply(replyToken: str, messageText: str):
+    token = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
+    url = "https://api.line.me/v2/bot/message/reply"
+    
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {token}"
+    }
+    
+    payload = {
+        "replyToken": replyToken,
+        "messages": [{"type": "text", "text": messageText}]
+    }
+    
+    requests.post(url, headers=headers, json=payload)
 
+@app.get("/health")
+async def healthCheck():
+    return {"status": "healthy"}
 
 @app.post("/webhook")
 async def webhookEndpoint(request: Request):
     headers = dict(request.headers)
     bodyBytes = await request.body()
 
-    isValidSignature = validateLineSignature(headers, bodyBytes)
-    if not isValidSignature:
+    if not validateLineSignature(headers, bodyBytes):
         raise HTTPException(status_code=403, detail="Invalid signature")
 
     eventList = parseLineEvents(bodyBytes)
 
     for event in eventList:
-        extractedData = extractMessageFromEvent(event)
-        if extractedData is None:
+        data = extractMessageFromEvent(event)
+        if data is None:
             continue
 
-        messageText, replyToken, userId = extractedData
+        userText, replyToken, userId = data
+        print(f"Received from {userId}: {userText}")
 
-        print(f"IncomingMessage: {messageText}")
-
-        tripRequest = None
+        #  If list is empty OR user not in list, BLOCK. --> to prevent unauthorized access and it costs money
+        if not ALLOWED_USERS or userId not in ALLOWED_USERS:
+            print(f"SECURITY: Blocked unauthorized user {userId}")
+            continue
 
         try:
-            tripRequest = parseTripFromNaturalText(messageText)
-
-            print(f"ParsedTripRequest: {tripRequest}")
-
-            if not tripRequest.startStation:
-                englishMessage = "Please tell me your starting station (for example: I am at Kyoto Station)."
-                japaneseMessage = "出発駅を教えてください（例：京都駅にいます）。"
-                replyText = englishMessage if tripRequest.userLanguage == "en" else japaneseMessage
-                createLineReply(replyToken, replyText)
-                continue
-
-            hasStation = findStationByName(tripRequest.startStation)
-            if not hasStation:
-                englishMessage = f"Start station '{tripRequest.startStation}' is not supported yet in this demo."
-                japaneseMessage = f"出発駅「{tripRequest.startStation}」はこのデモではまだサポートされていません。"
-                replyText = englishMessage if tripRequest.userLanguage == "en" else japaneseMessage
-                createLineReply(replyToken, replyText)
-                continue
-
-            candidateStations = selectCandidateStations(tripRequest, stationDataset)
-            if len(candidateStations) == 0:
-                englishMessage = "No destinations found within your budget or time window. Try increasing your budget or time."
-                japaneseMessage = "予算や時間の範囲内で行ける場所が見つかりませんでした。予算や時間を増やしてみてください。"
-                replyText = englishMessage if tripRequest.userLanguage == "en" else japaneseMessage
-                createLineReply(replyToken, replyText)
-                continue
-
-            itineraryResponse = createItineraryOptions(tripRequest, candidateStations)
-            replyText = formatItineraryForLine(itineraryResponse, tripRequest.userLanguage)
-            createLineReply(replyToken, replyText)
-
-        except Exception as error:
-            errorMessage = str(error)
-            isJapaneseLanguage = any(ord(character) > 127 for character in messageText)
-
-            if "insufficient_quota" in errorMessage:
-                englishMessage = "Our planning engine is out of API credit right now. Please try again later."
-                japaneseMessage = "現在APIの利用上限に達しています。時間をおいて再度お試しください。"
-                replyText = japaneseMessage if isJapaneseLanguage else englishMessage
-            else:
-                englishMessage = f"Sorry, an error occurred: {errorMessage}"
-                japaneseMessage = f"エラーが発生しました: {errorMessage}"
-                replyText = japaneseMessage if isJapaneseLanguage else englishMessage
-
-            print(f"ErrorInWebhook: {errorMessage}")
-            createLineReply(replyToken, replyText)
+            aiResponse = generateTripResponse(userId, userText)
+            sendLineReply(replyToken, aiResponse)
+            
+        except Exception as e:
+            print(f"Error: {str(e)}")
+            sendLineReply(replyToken, "Sorry, I encountered an error processing your request.")
 
     return {"status": "ok"}
-
-
-@app.get("/health")
-async def healthCheck():
-    return {"status": "healthy"}
