@@ -49,7 +49,7 @@ def sendLineReply(replyToken: str, messageText: str):
     
     requests.post(url, headers=headers, json=payload)
 
-@app.get("/health")
+@app.api_route("/health", methods=["GET", "HEAD"])
 async def healthCheck():
     return {"status": "healthy"}
 
