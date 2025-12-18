@@ -1,4 +1,4 @@
-# Line Bot: ドンピシャ | Donpsha (Perfect Match)
+# Line Bot: ドンピシャ | Donpsha (Dead On)
 
 A LINE bot that acts as an intelligent travel navigator for Japan.
 
