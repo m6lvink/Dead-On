@@ -16,3 +16,27 @@ class StationRecord:
     latitude: float
     longitude: float
     prefectureCode: str
+
+# FORMATTER MODELS (for messageFormatter.py)
+
+@dataclass
+class Activity:
+    poiName: str
+    descriptionEn: str
+    descriptionJp: str
+
+@dataclass
+class Stop:
+    stationName: str
+    activities: List[Activity]
+
+@dataclass
+class Itinerary:
+    label: str
+    stops: List[Stop]
+    estimatedTotalCostYen: int
+    estimatedTotalTimeMinutes: int
+
+@dataclass
+class ItineraryResponse:
+    itineraries: List[Itinerary]

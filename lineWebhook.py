@@ -17,14 +17,19 @@ def validateLineSignature(headers: Dict[str, Any], bodyBytes: bytes) -> bool:
     hashObj = hmac.new(channelSecret.encode("utf-8"), bodyBytes, hashlib.sha256)
     calculatedSignature = base64.b64encode(hashObj.digest()).decode("utf-8")
     
-    return signature == calculatedSignature
+    # Use constant-time compare to prevent timing attacks
+    return hmac.compare_digest(signature, calculatedSignature)
 
 def parseLineEvents(bodyBytes: bytes) -> List[Dict[str, Any]]:
     try:
         bodyStr = bodyBytes.decode("utf-8")
         bodyJson = json.loads(bodyStr)
         return bodyJson.get("events", [])
-    except:
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+        print(f"DEBUG: Failed to parse LINE events: {e}")
+        return list()
+    except Exception as e:
+        print(f"ERROR: Unexpected error parsing LINE events: {e}")
         return list()
 
 def extractMessageFromEvent(event: Dict[str, Any]) -> Optional[Tuple[str, str, str]]:

@@ -3,6 +3,6 @@ uvicorn>=0.20.0
 requests>=2.31.0
 google-genai>=0.2.0
 python-dotenv>=1.0.0
-thefuzz>=0.20.0
 json_repair>=0.20.0
 apscheduler>=3.10.0
+slowapi>=0.1.9

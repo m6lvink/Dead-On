@@ -1,9 +1,9 @@
-import json
 import os
+import re
 import time
 import random
-import traceback
-from typing import Dict, List, Optional, Any
+from collections import OrderedDict
+from typing import Dict, List, Optional, Any, Tuple
 from google import genai
 from google.genai import types
 from google.genai.errors import ClientError
@@ -19,7 +19,24 @@ if apiKey is not None and len(apiKey) > 0:
 else:
     print("CRITICAL WARNING: GEMINI_API_KEY is missing")
 
-# --- RETRY HELPER ---
+# Config
+MAX_CHAT_SESSIONS = int(os.environ.get("MAX_CHAT_SESSIONS", "1000"))
+MAX_MESSAGE_LENGTH = int(os.environ.get("MAX_MESSAGE_LENGTH", "2000"))
+
+# Blocked patterns for prompt injection protection
+BLOCKED_PATTERNS = [
+    r'ignore\s+(all\s+)?(previous\s+)?instructions?',
+    r'system\s+prompt',
+    r'you\s+are\s+now',
+    r'dan\s+mode',
+    r'jailbreak',
+    r'do\s+anything\s+now',
+    r'ignore\s+constraints',
+    r'developer\s+mode',
+    r'root\s+access',
+]
+
+# Retry helper
 def retry_api_call(func, *args, retries=3, delay=2, **kwargs):
     for attempt in range(retries):
         try:
@@ -33,12 +50,38 @@ def retry_api_call(func, *args, retries=3, delay=2, **kwargs):
                 raise e
     raise Exception("API Failed after max retries")
 
-# --- CONVERSATION MEMORY ---
-chatSessions: Dict[str, object] = {}
+# Input sanitization to prevent prompt injection
+def sanitizeUserInput(messageText: str) -> str:
+    if not messageText:
+        raise ValueError("Empty message")
+    
+    if len(messageText) > MAX_MESSAGE_LENGTH:
+        raise ValueError(f"Message too long: {len(messageText)} chars")
+    
+    for pattern in BLOCKED_PATTERNS:
+        if re.search(pattern, messageText, re.IGNORECASE):
+            print(f"SECURITY: Blocked potential prompt injection: {pattern}")
+            raise ValueError("Potentially malicious input detected")
+    
+    return messageText.strip()
+
+# Conversation Memory with LRU eviction
+chatSessions: OrderedDict[str, object] = OrderedDict()
+
+def evictOldestSession():
+    if len(chatSessions) > 0:
+        oldestKey = next(iter(chatSessions))
+        del chatSessions[oldestKey]
+        print(f"DEBUG: Evicted oldest chat session: {oldestKey}")
 
 def get_or_create_chat(userId: str):
-    if client is None: raise Exception("Gemini API Key missing")
-        
+    if client is None: 
+        raise Exception("Gemini API Key missing")
+    
+    # Evict oldest if at limit
+    if len(chatSessions) >= MAX_CHAT_SESSIONS:
+        evictOldestSession()
+    
     if userId not in chatSessions:
         chatSessions[userId] = client.chats.create(
             model="gemini-2.0-flash",
@@ -55,10 +98,14 @@ def get_or_create_chat(userId: str):
                 )
             )
         )
+    
+    # Move to end (most recently used)
+    chatSessions.move_to_end(userId)
     return chatSessions[userId]
 
-def parseUserMessage(messageText: str) -> TripConstraints:
-    if client is None: raise Exception("API Key missing")
+def parseUserMessage(messageText: str) -> Tuple[Optional[TripConstraints], float]:
+    if client is None: 
+        raise Exception("API Key missing")
 
     systemPrompt = (
         "Extract travel constraints.\n\n"
@@ -90,14 +137,16 @@ def parseUserMessage(messageText: str) -> TripConstraints:
         )
         data = json_repair.loads(response.text)
         
-        return TripConstraints(
-            startStationName=data.get("startStationName"),
+        constraints = TripConstraints(
+            startStationName=data.get("startStationName", ""),
             totalBudgetYen=int(data.get("totalBudgetYen", 3000)),
             timeWindowHours=float(data.get("timeWindowHours", 3.0)),
             moodLabel=data.get("moodLabel", "exploration"),
             userLanguage=data.get("userLanguage", "en"),
             isVague=bool(data.get("isVague", False))
-        ), float(data.get("searchRadiusKm", 20.0))
+        )
+        radiusKm = float(data.get("searchRadiusKm", 20.0))
+        return constraints, radiusKm
 
     except Exception as e:
         print(f"DEBUG: Parse Error: {e}")
@@ -105,6 +154,13 @@ def parseUserMessage(messageText: str) -> TripConstraints:
 
 def generateTripResponse(userId: str, messageText: str) -> str:
     print(f"DEBUG: Processing message for {userId}: {messageText}")
+    
+    # Sanitize input before processing
+    try:
+        messageText = sanitizeUserInput(messageText)
+    except ValueError as e:
+        print(f"SECURITY: Blocked message: {e}")
+        return "Sorry, I cannot process that message. Please try a different request."
     
     chat = get_or_create_chat(userId)
     constraints, radiusKm = parseUserMessage(messageText)

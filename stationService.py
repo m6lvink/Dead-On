@@ -9,33 +9,45 @@ stationMap = dict()
 
 def loadStationData():
     # Helper to load data once
-    if os.path.exists("stations.json"):
+    if not os.path.exists("stations.json"):
+        print("WARNING: stations.json not found. Station lookup disabled.")
+        return
+        
+    try:
         with open("stations.json", "r", encoding="utf-8") as file:
             dataList = json.load(file)
+    except json.JSONDecodeError as e:
+        print(f"ERROR: Failed to parse stations.json: {e}")
+        return
+    except Exception as e:
+        print(f"ERROR: Failed to load stations.json: {e}")
+        return
             
-        for group in dataList:
-            stationList = group.get("stations", [])
-            for sData in stationList:
-                name = sData.get("name_kanji", "")
-                lat = sData.get("lat")
-                lon = sData.get("lon")
-                pref = sData.get("prefecture", "")
-                
-                # Validation
-                isInvalid = (name == "") or (lat is None) or (lon is None)
-                if isInvalid:
-                    continue
-                
-                # Create Record
-                record = StationRecord(
-                    name=name,
-                    latitude=float(lat),
-                    longitude=float(lon),
-                    prefectureCode=pref
-                )
-                
-                # Store in Dictionary
-                stationMap[name] = record
+    for group in dataList:
+        stationList = group.get("stations", [])
+        for sData in stationList:
+            name = sData.get("name_kanji", "")
+            lat = sData.get("lat")
+            lon = sData.get("lon")
+            pref = sData.get("prefecture", "")
+            
+            # Validation
+            isInvalid = (name == "") or (lat is None) or (lon is None)
+            if isInvalid:
+                continue
+            
+            # Create Record
+            record = StationRecord(
+                name=name,
+                latitude=float(lat),
+                longitude=float(lon),
+                prefectureCode=pref
+            )
+            
+            # Store in Dictionary
+            stationMap[name] = record
+    
+    print(f"DEBUG: Loaded {len(stationMap)} stations")
 
 # Initialize on load
 loadStationData()

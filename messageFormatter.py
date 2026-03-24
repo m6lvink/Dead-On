@@ -37,24 +37,7 @@ def formatItineraryForLine(itineraryResponse: ItineraryResponse, userLanguage: s
     
     return "".join(replyLines).strip()
 
+# NOTE: Use sendLineReply from main.py instead --> this function kept for backwards compat
 def createLineReply(replyToken: str, replyText: str) -> bool:
-    lineChannelAccessToken = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
-    lineReplyUrl = "https://api.line.me/v2/bot/message/reply"
-    
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {lineChannelAccessToken}"
-    }
-    
-    payload = {
-        "replyToken": replyToken,
-        "messages": [
-            {
-                "type": "text",
-                "text": replyText
-            }
-        ]
-    }
-    
-    response = requests.post(lineReplyUrl, headers=headers, json=payload)
-    return response.status_code == 200
+    from main import sendLineReply
+    return sendLineReply(replyToken, replyText)

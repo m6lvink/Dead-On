@@ -10,7 +10,6 @@ Utilizing **Google Gemini 2.0 Flash** to interpret natural language requests (li
     * Uses Gemini 2.0 to extract specific constraints (budget, time windows, and mood) from casual conversation.
     * Handles both English and Japanese inputs.
 * **Geographic Logic**
-    * **Fuzzy Matching:** Uses `thefuzz` algorithms to map specific landmarks (e.g., "Dotonbori") or vague inputs to the nearest valid rail station.
     * **Dynamic Search Radius:** Contextually expands or contracts the search area based on the request type.
         * "Walking distance" sets a 1.5 km limit.
         * "Dinner/Drinks" sets a 5.0 km limit.
@@ -38,12 +37,15 @@ The project relies on these core files:
 3.  **`stationService.py`** (Geospatial Layer)
     * The map engine.
     * Loads `stations.json` into memory.
-    * Performs Haversine distance calculations and runs fuzzy string matching to find stations.
+    * Performs Haversine distance calculations to find nearby stations.
 4.  **`lineWebhook.py`** (Utility)
     * Handles the cryptographic validation required by LINE to verify message authenticity.
     * Parses raw request bodies into usable event objects.
 5.  **`tripModels.py`** (Data Structures)
-    * Defines strict Python dataclasses (like `TripConstraints` and `StationRecord`) to ensure data consistency across the app.
+    * Defines strict Python dataclasses (`TripConstraints`, `StationRecord`, `Activity`, `Stop`, `Itinerary`, `ItineraryResponse`) to ensure data consistency across the app.
+6.  **`messageFormatter.py`** (Response Formatter)
+    * Formats itinerary responses for LINE messages.
+    * Supports both English and Japanese language output.
 
 ## Setup
 
