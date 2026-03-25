@@ -127,7 +127,7 @@ def parseUserMessage(messageText: str) -> Tuple[Optional[TripConstraints], float
     try:
         response = retry_api_call(
             client.models.generate_content,
-            model="gemini-2.0-flash",
+            model="gemini-2.5-flash",
             contents=messageText,
             config=types.GenerateContentConfig(
                 system_instruction=systemPrompt,
