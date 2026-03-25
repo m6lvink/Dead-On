@@ -84,7 +84,7 @@ def get_or_create_chat(userId: str):
     
     if userId not in chatSessions:
         chatSessions[userId] = client.chats.create(
-            model="gemini-2.0-flash",
+            model="gemini-2.5-flash",
             config=types.GenerateContentConfig(
                 temperature=0.3,
                 system_instruction=(
