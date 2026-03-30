@@ -2,50 +2,54 @@
 
 A LINE bot that acts as an intelligent travel navigator for Japan.
 
-Utilizing **Google Gemini 2.0 Flash** to interpret natural language requests (like "cheap dinner date spots"), this bot works as a logic layer between the user and a local station database (`stations.json`). It validates user intent against real geography to suggest accessible train-based destinations.
+Uses **Google Gemini** as the primary LLM with **Deepseek** as a fallback for interpreting natural language requests (like "cheap dinner date spots"). The bot validates user intent against real geography to suggest accessible train-based destinations.
 
 ## Key Features
 
 * **Natural Language Understanding**
-    * Uses Gemini 2.0 to extract specific constraints (budget, time windows, and mood) from casual conversation.
+    * Extracts specific constraints (budget, time windows, mood) from casual conversation.
     * Handles both English and Japanese inputs.
 * **Geographic Logic**
-    * **Dynamic Search Radius:** Contextually expands or contracts the search area based on the request type.
+    * **Dynamic Search Radius:** Contextually expands or contracts search area based on request type.
         * "Walking distance" sets a 1.5 km limit.
         * "Dinner/Drinks" sets a 5.0 km limit.
         * "Day trip" sets a 20.0+ km limit.
 * **Stateful Context**
-    * Keeps conversation history for each user. If a suggestion is rejected ("too far"), the bot checks previous context to provide a better alternative.
+    * Keeps conversation history per user. If a suggestion is rejected ("too far"), the bot uses previous context to provide a better alternative.
 * **System Resilience**
-    * Includes auto-retry logic with exponential backoff to manage API rate limits (429 errors).
-    * Uses `json_repair` to fix formatting errors in AI outputs to ensure the application stays stable.
+    * Auto-retry with exponential backoff for API rate limits (429 errors).
+    * Automatic fallback from Gemini to Deepseek if the primary LLM fails.
+    * Uses `json_repair` to fix formatting errors in AI outputs.
 * **User Experience**
-    * Generates direct **Google Maps Search Links** for every recommendation to help with navigation.
+    * Generates direct **Google Maps Search Links** for every recommendation.
 
 ## Architecture
 
-The project relies on these core files:
+Core files:
 
 1.  **`main.py`** (Server)
-    * The entry point for the application.
-    * Handles the FastAPI server and validates LINE Webhook signatures.
+    * Entry point for the application.
+    * Handles FastAPI server and validates LINE Webhook signatures.
     * Enforces security by checking User IDs against the allowlist.
 2.  **`tripFlow.py`** (Logic Core)
-    * The brain of the bot.
-    * Manages chat sessions and connects with the Gemini API.
-    * Handles the logic for retries, formatting responses, and generating Google Maps links.
+    * Manages chat sessions and connects to LLMs via the unified client.
+    * Handles retry logic, formatting responses, and generating Google Maps links.
 3.  **`stationService.py`** (Geospatial Layer)
-    * The map engine.
     * Loads `stations.json` into memory.
     * Performs Haversine distance calculations to find nearby stations.
 4.  **`lineWebhook.py`** (Utility)
-    * Handles the cryptographic validation required by LINE to verify message authenticity.
+    * Handles cryptographic validation required by LINE.
     * Parses raw request bodies into usable event objects.
 5.  **`tripModels.py`** (Data Structures)
-    * Defines strict Python dataclasses (`TripConstraints`, `StationRecord`, `Activity`, `Stop`, `Itinerary`, `ItineraryResponse`) to ensure data consistency across the app.
+    * Defines Python dataclasses for data consistency.
 6.  **`messageFormatter.py`** (Response Formatter)
     * Formats itinerary responses for LINE messages.
-    * Supports both English and Japanese language output.
+    * Supports both English and Japanese output.
+7.  **`llm/`** (LLM Client Package)
+    * Unified client for multiple LLM providers.
+    * `client.py` - Main client with fallback logic.
+    * `gemini_provider.py` - Gemini implementation.
+    * `deepseek_provider.py` - Deepseek implementation.
 
 ## Setup
 
@@ -59,11 +63,12 @@ The project relies on these core files:
     pip install -r requirements.txt
     ```
 3.  **Configuration**
-    Create a `.env` file with these values:
+    Create a `.env` file:
     ```ini
     LINE_CHANNEL_ACCESS_TOKEN=...
     LINE_CHANNEL_SECRET=...
     GEMINI_API_KEY=...
+    DEEPSEEK_API_KEY=...
     ALLOWED_USER_IDS=Uxxxxxxxx...
     ```
 4.  **Deployment**
