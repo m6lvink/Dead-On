@@ -1,11 +1,16 @@
 import os
 import time
+import logging
+import threading
 from typing import Optional, List, Dict, Tuple
 from collections import OrderedDict
 from .base import LLMProvider
 from .models import LLMResponse, ChatSession, ChatMessage
 from .gemini_provider import GeminiProvider
 from .deepseek_provider import DeepseekProvider
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 
 class UnifiedLLMClient:
@@ -19,21 +24,23 @@ class UnifiedLLMClient:
         self._providers: Dict[str, LLMProvider] = {}
         self._chat_sessions: OrderedDict[str, Tuple[ChatSession, str]] = OrderedDict()
         self._max_chat_sessions = max_chat_sessions
+        # Thread-safe lock for session management
+        self._sessions_lock = threading.RLock()
 
         gemini = GeminiProvider(api_key=gemini_api_key)
         if gemini.is_available():
             self._providers["gemini"] = gemini
         else:
-            print("WARNING: Gemini provider is not available")
+            logger.warning("Gemini provider is not available")
 
         deepseek = DeepseekProvider(api_key=deepseek_api_key, base_url=deepseek_base_url)
         if deepseek.is_available():
             self._providers["deepseek"] = deepseek
         else:
-            print("WARNING: Deepseek provider is not available")
+            logger.warning("Deepseek provider is not available")
 
         if not self._providers:
-            print("CRITICAL WARNING: No LLM providers are available")
+            logger.critical("No LLM providers are available")
 
     def is_available(self) -> bool:
         return len(self._providers) > 0
@@ -82,7 +89,7 @@ class UnifiedLLMClient:
                 except Exception as e:
                     last_error = e
                     if self._is_rate_limit_error(e):
-                        print(f"DEBUG: Gemini rate limit hit. Retrying in {delay}s...")
+                        logger.debug(f"Gemini rate limit hit. Retrying in {delay}s...")
                         time.sleep(delay)
                         delay *= 2
                     else:
@@ -90,7 +97,7 @@ class UnifiedLLMClient:
 
         fallback = self._get_fallback_provider()
         if fallback and fallback != primary:
-            print(f"DEBUG: Falling back to Deepseek")
+            logger.debug("Falling back to Deepseek")
             for attempt in range(retries):
                 try:
                     return fallback.generate_content(
@@ -103,7 +110,7 @@ class UnifiedLLMClient:
                 except Exception as e:
                     last_error = e
                     if self._is_rate_limit_error(e):
-                        print(f"DEBUG: Deepseek rate limit hit. Retrying in {delay}s...")
+                        logger.debug(f"Deepseek rate limit hit. Retrying in {delay}s...")
                         time.sleep(delay)
                         delay *= 2
                     else:
@@ -112,10 +119,12 @@ class UnifiedLLMClient:
         raise last_error or Exception("All providers failed")
 
     def _evict_oldest_session(self):
-        if len(self._chat_sessions) > 0:
-            oldest_key = next(iter(self._chat_sessions))
-            del self._chat_sessions[oldest_key]
-            print(f"DEBUG: Evicted oldest chat session: {oldest_key}")
+        """Evict the oldest chat session. Thread-safe."""
+        with self._sessions_lock:
+            if len(self._chat_sessions) > 0:
+                oldest_key = next(iter(self._chat_sessions))
+                del self._chat_sessions[oldest_key]
+                logger.debug(f"Evicted oldest chat session: {oldest_key}")
 
     def get_or_create_chat(
         self,
@@ -127,32 +136,33 @@ class UnifiedLLMClient:
         if not self.is_available():
             raise Exception("No LLM providers are available")
 
-        if len(self._chat_sessions) >= self._max_chat_sessions:
-            self._evict_oldest_session()
+        with self._sessions_lock:
+            if len(self._chat_sessions) >= self._max_chat_sessions:
+                self._evict_oldest_session()
 
-        if user_id in self._chat_sessions:
-            session, session_model = self._chat_sessions[user_id]
-            if session_model == model:
-                self._chat_sessions.move_to_end(user_id)
-                return session
+            if user_id in self._chat_sessions:
+                session, session_model = self._chat_sessions[user_id]
+                if session_model == model:
+                    self._chat_sessions.move_to_end(user_id)
+                    return session
 
-        provider = self._get_primary_provider()
-        if not provider:
-            provider = self._get_fallback_provider()
+            provider = self._get_primary_provider()
+            if not provider:
+                provider = self._get_fallback_provider()
 
-        if not provider:
-            raise Exception("No LLM providers are available")
+            if not provider:
+                raise Exception("No LLM providers are available")
 
-        session = provider.create_chat(
-            model=model,
-            system_instruction=system_instruction,
-            temperature=temperature
-        )
+            session = provider.create_chat(
+                model=model,
+                system_instruction=system_instruction,
+                temperature=temperature
+            )
 
-        self._chat_sessions[user_id] = (session, model)
-        self._chat_sessions.move_to_end(user_id)
+            self._chat_sessions[user_id] = (session, model)
+            self._chat_sessions.move_to_end(user_id)
 
-        return session
+            return session
 
     def send_chat_message(
         self,
@@ -176,11 +186,11 @@ class UnifiedLLMClient:
                 return chat.send_message(message)
             except Exception as e:
                 if self._is_rate_limit_error(e):
-                    print(f"DEBUG: Rate limit hit. Retrying in {delay}s...")
+                    logger.debug(f"Rate limit hit. Retrying in {delay}s...")
                     time.sleep(delay)
                     delay *= 2
                 elif "Gemini provider is not available" in str(e) or "Deepseek provider is not available" in str(e):
-                    print(f"DEBUG: Primary provider unavailable, trying fallback...")
+                    logger.debug("Primary provider unavailable, trying fallback...")
                     fallback = self._get_fallback_provider()
                     if fallback:
                         session = fallback.create_chat(
@@ -188,7 +198,8 @@ class UnifiedLLMClient:
                             system_instruction=system_instruction,
                             temperature=temperature
                         )
-                        self._chat_sessions[user_id] = (session, model)
+                        with self._sessions_lock:
+                            self._chat_sessions[user_id] = (session, model)
                         return session.send_message(message)
                     raise e
                 else:
@@ -197,7 +208,15 @@ class UnifiedLLMClient:
         raise Exception("Chat message failed after max retries")
 
     def get_chat_history(self, user_id: str) -> List[ChatMessage]:
-        if user_id in self._chat_sessions:
-            session, _ = self._chat_sessions[user_id]
-            return session.get_history()
-        return []
+        """Get chat history for a user. Thread-safe."""
+        with self._sessions_lock:
+            if user_id in self._chat_sessions:
+                session, _ = self._chat_sessions[user_id]
+                return session.get_history()
+            return []
+
+    def clear_chat_sessions(self):
+        """Clear all chat sessions. Thread-safe."""
+        with self._sessions_lock:
+            self._chat_sessions.clear()
+            logger.info("All chat sessions cleared")
