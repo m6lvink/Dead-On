@@ -56,10 +56,10 @@ BLOCKED_PATTERNS = [
     r'(?i)(?:translate|convert)\s+(?:to|into)\s+(?:hex|base64|binary)',
 ]
 
-# Google Maps URL validation pattern
-GOOGLE_MAPS_PATTERN = re.compile(
-    r'^https://www\.google\.com/maps/search/\?api=1&query=[\w\s\-%]+$'
-)
+# Google Maps URL validation - domain and path only
+# Query parameters can contain any characters (Japanese place names, encoding, etc.)
+GOOGLE_MAPS_DOMAINS = ('www.google.com', 'google.com')
+GOOGLE_MAPS_PATH_PREFIX = '/maps/search/'
 
 PARSING_SYSTEM_PROMPT = (
     "Extract travel constraints.\n\n"
@@ -111,17 +111,32 @@ def normalize_for_security(text: str) -> str:
 def validate_google_maps_url(url: str) -> bool:
     """
     Validate that URL is a legitimate Google Maps search URL.
-    Prevents malicious redirects in LLM output.
+    Prevents malicious redirects in LLM output while allowing
+    Japanese place names and various URL encodings.
+    
+    Validation checks:
+    - HTTPS scheme only
+    - Google Maps domain only
+    - Maps search path
+    - Contains api=1 parameter
     """
     if not url:
         return True  # No URL is acceptable
     try:
         parsed = urlparse(url)
+        # Validate scheme (HTTPS only for security)
         if parsed.scheme != 'https':
             return False
-        if parsed.netloc not in ('www.google.com', 'google.com'):
+        # Validate domain (Google only)
+        if parsed.netloc not in GOOGLE_MAPS_DOMAINS:
             return False
-        return bool(GOOGLE_MAPS_PATTERN.match(url))
+        # Validate path (must be maps search)
+        if not parsed.path.startswith(GOOGLE_MAPS_PATH_PREFIX):
+            return False
+        # Validate query has api=1 (Google Maps API indicator)
+        if 'api=1' not in parsed.query:
+            return False
+        return True
     except Exception:
         return False
 
