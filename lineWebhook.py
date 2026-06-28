@@ -45,6 +45,9 @@ def parseLineEvents(bodyBytes: bytes) -> List[Dict[str, Any]]:
     try:
         bodyStr = bodyBytes.decode("utf-8")
         bodyJson = json.loads(bodyStr)
+        if not isinstance(bodyJson, dict):
+            logger.warning("Invalid LINE payload format: body is not an object")
+            return list()
         events = bodyJson.get("events", [])
         # Validate events is a list
         if not isinstance(events, list):
