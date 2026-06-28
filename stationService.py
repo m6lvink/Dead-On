@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 
 # Global storage
 stationMap = dict()
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 def validateStationData(sData: dict) -> bool:
@@ -57,12 +58,14 @@ def loadStationData():
     Load station data from stations.json with schema validation.
     Invalid records are skipped.
     """
-    if not os.path.exists("stations.json"):
+    stationDataPath = os.path.join(BASE_DIR, "stations.json")
+
+    if not os.path.exists(stationDataPath):
         logger.warning("stations.json not found. Station lookup disabled.")
         return
 
     try:
-        with open("stations.json", "r", encoding="utf-8") as file:
+        with open(stationDataPath, "r", encoding="utf-8") as file:
             dataList = json.load(file)
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse stations.json: {e}")
