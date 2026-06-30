@@ -90,6 +90,9 @@ def extractMessageFromEvent(event: Dict[str, Any]) -> Optional[Tuple[str, str, s
     if not isinstance(text, str):
         logger.debug("Invalid text format: not a string")
         return None
+    if not text.strip():
+        logger.debug("Invalid text format: empty string")
+        return None
 
     # Validate text length
     if len(text) > MAX_FIELD_LENGTHS["text"]:
@@ -99,6 +102,9 @@ def extractMessageFromEvent(event: Dict[str, Any]) -> Optional[Tuple[str, str, s
     replyToken = event.get("replyToken", "")
     if not isinstance(replyToken, str):
         logger.debug("Invalid replyToken format: not a string")
+        return None
+    if not replyToken.strip():
+        logger.debug("Invalid replyToken format: empty string")
         return None
 
     # Validate replyToken length
@@ -114,6 +120,9 @@ def extractMessageFromEvent(event: Dict[str, Any]) -> Optional[Tuple[str, str, s
     userId = source.get("userId", "")
     if not isinstance(userId, str):
         logger.debug("Invalid userId format: not a string")
+        return None
+    if not userId.strip():
+        logger.debug("Invalid userId format: empty string")
         return None
 
     # Validate userId length
