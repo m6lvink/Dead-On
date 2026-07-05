@@ -26,7 +26,14 @@ def validateLineSignature(headers: Dict[str, Any], bodyBytes: bytes) -> bool:
     if channelSecret is None:
         return False
 
-    signature = headers.get("x-line-signature")
+    signature = next(
+        (
+            value
+            for key, value in headers.items()
+            if isinstance(key, str) and key.lower() == "x-line-signature"
+        ),
+        None,
+    )
     if signature is None:
         return False
 
