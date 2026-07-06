@@ -1,6 +1,28 @@
 import unittest
+import base64
+import hashlib
+import hmac
+import os
 
-from lineWebhook import extractMessageFromEvent, parseLineEvents
+from lineWebhook import extractMessageFromEvent, parseLineEvents, validateLineSignature
+
+
+class ValidateLineSignatureTests(unittest.TestCase):
+    def test_header_lookup_is_case_insensitive(self):
+        secret = "test-secret"
+        body = b'{"events":[]}'
+        digest = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).digest()
+        signature = base64.b64encode(digest).decode("utf-8")
+
+        original_secret = os.environ.get("LINE_CHANNEL_SECRET")
+        os.environ["LINE_CHANNEL_SECRET"] = secret
+        try:
+            self.assertTrue(validateLineSignature({"X-Line-Signature": signature}, body))
+        finally:
+            if original_secret is None:
+                os.environ.pop("LINE_CHANNEL_SECRET", None)
+            else:
+                os.environ["LINE_CHANNEL_SECRET"] = original_secret
 
 
 class ParseLineEventsTests(unittest.TestCase):
