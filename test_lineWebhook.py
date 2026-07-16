@@ -24,6 +24,17 @@ class ValidateLineSignatureTests(unittest.TestCase):
             else:
                 os.environ["LINE_CHANNEL_SECRET"] = original_secret
 
+    def test_non_string_signature_header_returns_false(self):
+        original_secret = os.environ.get("LINE_CHANNEL_SECRET")
+        os.environ["LINE_CHANNEL_SECRET"] = "test-secret"
+        try:
+            self.assertFalse(validateLineSignature({"X-Line-Signature": 123}, b'{"events":[]}'))
+        finally:
+            if original_secret is None:
+                os.environ.pop("LINE_CHANNEL_SECRET", None)
+            else:
+                os.environ["LINE_CHANNEL_SECRET"] = original_secret
+
 
 class ParseLineEventsTests(unittest.TestCase):
     def test_non_object_payload_returns_empty_list(self):
