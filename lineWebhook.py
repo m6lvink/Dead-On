@@ -34,7 +34,7 @@ def validateLineSignature(headers: Dict[str, Any], bodyBytes: bytes) -> bool:
         ),
         None,
     )
-    if signature is None:
+    if not isinstance(signature, str):
         return False
 
     hashObj = hmac.new(channelSecret.encode("utf-8"), bodyBytes, hashlib.sha256)
