@@ -267,6 +267,11 @@ def generateTripResponse(userId: str, messageText: str) -> str:
                 )
             else:
                 contextInfo = f"\n[SYSTEM DATA: No stations found within {radiusKm}km of {startRecord.name}. Warn the user.]"
+        else:
+            contextInfo = (
+                f"\n[SYSTEM DATA: Station '{constraints.startStationName}' was not found "
+                "in the dataset. Ask the user to confirm the station name in Kanji.]"
+            )
 
     fullPrompt = f"{messageText}\n{contextInfo}"
 

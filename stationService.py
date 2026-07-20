@@ -12,6 +12,11 @@ logger = logging.getLogger(__name__)
 stationMap = dict()
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
+# Same-spot threshold for duplicate name_kanji entries (degrees)
+SAME_LOCATION_DEG = 0.001
+# ~111 km per degree latitude
+KM_PER_DEG_LAT = 111.0
+
 
 def validateStationData(sData: dict) -> bool:
     """
@@ -53,6 +58,13 @@ def validateStationData(sData: dict) -> bool:
     return True
 
 
+def _isSameLocation(latOne: float, lonOne: float, latTwo: float, lonTwo: float) -> bool:
+    return (
+        abs(latOne - latTwo) < SAME_LOCATION_DEG
+        and abs(lonOne - lonTwo) < SAME_LOCATION_DEG
+    )
+
+
 def loadStationData():
     """
     Load station data from stations.json with schema validation.
@@ -76,6 +88,8 @@ def loadStationData():
 
     valid_count = 0
     invalid_count = 0
+    duplicate_same_count = 0
+    duplicate_distant_count = 0
 
     # Validate dataList is a list
     if not isinstance(dataList, list):
@@ -114,13 +128,37 @@ def loadStationData():
                     longitude=float(sData["lon"]),
                     prefectureCode=sData.get("prefecture", "")
                 )
+
+                existing = stationMap.get(record.name)
+                if existing is not None:
+                    # Same spot on another line --> keep first entry
+                    if _isSameLocation(
+                        existing.latitude,
+                        existing.longitude,
+                        record.latitude,
+                        record.longitude,
+                    ):
+                        duplicate_same_count += 1
+                        continue
+                    # Same name in a different city --> keep first-loaded (stable)
+                    logger.debug(
+                        f"Skipping distant duplicate station name: {record.name}"
+                    )
+                    duplicate_distant_count += 1
+                    continue
+
                 stationMap[record.name] = record
                 valid_count += 1
             except Exception as e:
                 logger.debug(f"Failed to create StationRecord: {e}")
                 invalid_count += 1
 
-    logger.info(f"Loaded {valid_count} stations ({invalid_count} invalid records skipped)")
+    logger.info(
+        f"Loaded {valid_count} stations "
+        f"({invalid_count} invalid, "
+        f"{duplicate_same_count} same-location dupes, "
+        f"{duplicate_distant_count} distant name collisions skipped)"
+    )
 
 
 # Initialize on load
@@ -152,12 +190,33 @@ def calculateDistanceKm(latOne: float, lonOne: float, latTwo: float, lonTwo: flo
     return earthRadiusKm * valC
 
 
+def _degreeBounds(maxDistanceKm: float, latitude: float) -> Tuple[float, float]:
+    """
+    Lat/lon degree thresholds for a quick box filter before Haversine.
+    Pads the search radius so edge stations are not dropped early.
+    """
+    paddedKm = max(maxDistanceKm * 1.2, maxDistanceKm + 1.0)
+    latBound = paddedKm / KM_PER_DEG_LAT
+    cosLat = math.cos(math.radians(latitude))
+    # Avoid division by near-zero near the poles
+    if abs(cosLat) < 0.01:
+        lonBound = 180.0
+    else:
+        lonBound = paddedKm / (KM_PER_DEG_LAT * abs(cosLat))
+    return latBound, lonBound
+
+
 def findNearbyStations(startStation: StationRecord, maxDistanceKm: float) -> List[str]:
     """
     Returns a list of station names within the specified radius.
-    Filters out stations that are too close (< 2.0 km).
+    For radii above 2.0 km, filters out stations that are too close (< 2.0 km).
+    For smaller radii (e.g. walking 1.5 km), only the start station is excluded.
     """
     nearbyNames = list()
+
+    # Small radius (walking) --> no 2 km floor, otherwise nothing can match
+    minDistanceKm = 0.0 if maxDistanceKm <= 2.0 else 2.0
+    latBound, lonBound = _degreeBounds(maxDistanceKm, startStation.latitude)
 
     for record in stationMap.values():
         if record.name == startStation.name:
@@ -165,7 +224,11 @@ def findNearbyStations(startStation: StationRecord, maxDistanceKm: float) -> Lis
 
         # Quick coordinate diff check before expensive math
         latDiff = abs(record.latitude - startStation.latitude)
-        if latDiff > 1.0:  # Approx 111km
+        if latDiff > latBound:
+            continue
+
+        lonDiff = abs(record.longitude - startStation.longitude)
+        if lonDiff > lonBound:
             continue
 
         dist = calculateDistanceKm(
@@ -175,7 +238,8 @@ def findNearbyStations(startStation: StationRecord, maxDistanceKm: float) -> Lis
             record.longitude
         )
 
-        isWithinRange = (dist <= maxDistanceKm) and (dist > 2.0)  # Ensure not too close
+        # Ensure not too close (when radius allows a 2 km floor)
+        isWithinRange = (dist <= maxDistanceKm) and (dist > minDistanceKm)
         if isWithinRange:
             nearbyNames.append(record.name)
 
